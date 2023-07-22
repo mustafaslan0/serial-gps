@@ -38,10 +38,11 @@ def gps_publisher():
     while not rospy.is_shutdown():
         try:
             # GPS verilerini seri porttan okuyun
-            gps_raw_data = ser.readline().decode('utf-8').strip()
+            gps_raw_data = ser.readline().strip()
             rospy.loginfo(f"GPS Raw Data: {gps_raw_data}")
 
             # "$GNGGA" mesajını ayıklayın
+            gps_raw_data = gps_raw_data.decode('ascii')
             latitude, longitude, altitude = parse_gngga_data(gps_raw_data)
 
             # Eğer mesaj başarılı bir şekilde ayıklandıysa, GPS verilerini yayınlayın
