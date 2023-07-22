@@ -1,47 +1,67 @@
-import serial
+#!/usr/bin/env python
+
 import rospy
-import argparse
 from sensor_msgs.msg import NavSatFix
+import serial
 
-# Argümanları parse et
-# python gps_node.py /dev/ttyUSB0
+def parse_gngga_data(gngga_data):
+    # "$GNGGA" mesajını ayıklayın ve latitude, longitude ve altitude değerlerini döndürün
+    gngga_parts = gngga_data.split(',')
+    if gngga_parts[0] == "$GNGGA" and len(gngga_parts) >= 10:
+        latitude = float(gngga_parts[2]) / 100.0
+        longitude = float(gngga_parts[4]) / 100.0
+        altitude = float(gngga_parts[9])
+        return latitude, longitude, altitude
+    else:
+        return None, None, None
 
-parser = argparse.ArgumentParser(description='Read GPS data from a serial port and publish it to a ROS topic.')
-parser.add_argument('port', type=str, help='The name of the serial port to read from.')
-args = parser.parse_args()
+def gps_publisher():
+    # Seri haberleşme ayarları
+    serial_port = '/dev/ttyUSB0'  # GPS cihazının bağlı olduğu seri portu belirtin
+    baud_rate = 9600             # GPS cihazının baud hızını belirtin (örn: 9600)
 
-# Seri portu aç
-ser = serial.Serial(args.port, 9600)
+    # GPS verilerini okumak için seri portu açın
+    try:
+        ser = serial.Serial(serial_port, baud_rate, timeout=1)
+        rospy.loginfo("Serial port opened successfully.")
+    except serial.SerialException as e:
+        rospy.logerr(f"Failed to open serial port: {str(e)}")
+        return
 
-# ROS publisher'ı başlat
-pub = rospy.Publisher('gps', NavSatFix, queue_size=10)
-rospy.init_node('gps_node', anonymous=True)
-rate = rospy.Rate(10)  # 10hz
+    # ROS yayıncısını oluşturun
+    rospy.init_node('gps_publisher_node', anonymous=True)
+    gps_pub = rospy.Publisher('gps_data', NavSatFix, queue_size=10)
 
-while not rospy.is_shutdown():
-    line = ser.readline().decode('utf-8')  # Satırı oku ve decode et
-    if line.startswith('$GNGGA'):  # Eğer satır $GNGGA ile başlıyorsa
-        parts = line.split(',')  # Satırı virgüllere göre parçala
-        time = parts[1]
-        latitude = float(parts[2][:2]) + float(parts[2][2:])/60  # Dereceye çevir
-        lat_direction = parts[3]
-        longitude = float(parts[4][:3]) + float(parts[4][3:])/60  # Dereceye çevir
-        lon_direction = parts[5]
-        fix_quality = parts[6]
-        num_of_satellites = parts[7]
-        hdop = parts[8]
-        altitude = parts[9]
-        geoid_height = parts[11]
+    # ROS hızını ayarlayın
+    rate = rospy.Rate(1) # 1 Hz
 
-        # ROS mesajını oluştur
-        gps_msg = NavSatFix()
-        gps_msg.header.stamp = rospy.Time.now()
-        gps_msg.header.frame_id = "gps"
-        gps_msg.latitude = latitude if lat_direction == 'N' else -latitude
-        gps_msg.longitude = longitude if lon_direction == 'E' else -longitude
-        gps_msg.altitude = float(altitude)
+    while not rospy.is_shutdown():
+        try:
+            # GPS verilerini seri porttan okuyun
+            gps_raw_data = ser.readline().decode('utf-8').strip()
+            rospy.loginfo(f"GPS Raw Data: {gps_raw_data}")
 
-        # Mesajı yayınla
-        pub.publish(gps_msg)
+            # "$GNGGA" mesajını ayıklayın
+            latitude, longitude, altitude = parse_gngga_data(gps_raw_data)
 
+            # Eğer mesaj başarılı bir şekilde ayıklandıysa, GPS verilerini yayınlayın
+            if latitude is not None and longitude is not None and altitude is not None:
+                # NavSatFix mesajını doldurun
+                gps_data = NavSatFix()
+                gps_data.latitude = latitude
+                gps_data.longitude = longitude
+                gps_data.altitude = altitude
+
+                # GPS verilerini yayınlayın
+                gps_pub.publish(gps_data)
+
+        except serial.SerialException as e:
+            rospy.logerr(f"Serial port error: {str(e)}")
+        
         rate.sleep()
+
+if __name__ == '__main__':
+    try:
+        gps_publisher()
+    except rospy.ROSInterruptException:
+        pass
